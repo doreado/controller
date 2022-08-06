@@ -57,7 +57,7 @@ class Statistics(app_manager.RyuApp):
         self.awareness = lookup_service_brick('awareness')
         self.delay = lookup_service_brick('delay')
 
-        self.monitor_thread = hub.spawn(self.monitor)
+        self.monitor_thread = hub.spawn_after(30, self.monitor)
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
                 [MAIN_DISPATCHER, DEAD_DISPATCHER])
@@ -443,10 +443,24 @@ class Statistics(app_manager.RyuApp):
     def write_values(self):
         a = time.time()
         metrics_dir = setting.METRICS_DIR
-        if self.delay.link_delay:
+        net_info = setting.NET_INFO
+
+        if self.delay.link_delay and self.link_free_bw and self.link_used_bw and self.link_loss:
             for link in self.link_free_bw:
                 self.net_info[link] = [round(self.link_free_bw[link],6) , round(self.delay.link_delay[link],6), round(self.link_loss[link],6)]
                 self.net_metrics[link] = [round(self.link_free_bw[link],6), round(self.link_used_bw[link],6), round(self.link_loss[link],6), round(self.delay.link_delay[link],6)]
+
+            self.logger.info("[INFO] Updating net_info file")
+            with open(net_info,'w') as csvfile:
+                header_names = ['node1','node2','bwd','delay', 'pkloss']
+                file = csv.writer(csvfile, delimiter=',',quotechar='|', quoting=csv.QUOTE_MINIMAL)
+                links_in = []
+                file.writerow(header_names)
+                for link, values in sorted(self.net_info.items()):
+                    links_in.append(link)
+                    tup = (link[1], link[0])
+                    if tup not in links_in:
+                        file.writerow([link[0],link[1], values[0],values[1],values[2]])
 
             file_metrics = metrics_dir + str(self.count_monitor) + '_net_metrics.csv'
             with open(file_metrics,'w') as csvfile:

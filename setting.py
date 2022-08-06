@@ -15,5 +15,5 @@ BW = './bw_r.txt'
 
 TIMES = './times.txt'
 STRETCH_DIR = './stretch/'
-
+NET_INFO = './net_info.csv'
 METRICS_DIR = './Metrics/'

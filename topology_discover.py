@@ -92,7 +92,6 @@ class TopologyDiscover(app_manager.RyuApp):
         match = parser.OFPMatch()
         actions = [parser.OFPActionOutput(ofproto.OFPP_CONTROLLER,
                                           ofproto.OFPCML_NO_BUFFER)]
-        self.logger.info("[DEBUG] " + str(match))
         self.add_flow(datapath, 0, match, actions)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -141,7 +140,7 @@ class TopologyDiscover(app_manager.RyuApp):
         if present_time - self.start_time < self.initiation_delay: #Set to 30s
             return
 
-        self.logger.info("[INFO] Getting topology information]")
+        self.logger.info("[INFO] Getting topology information")
         switch_list = get_switch(self.topology_api_app, None)
         self.create_port_map(switch_list)
         time.sleep(0.5)
