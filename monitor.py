@@ -57,7 +57,7 @@ class Statistics(app_manager.RyuApp):
         self.awareness = lookup_service_brick('awareness')
         self.delay = lookup_service_brick('delay')
 
-        self.monitor_thread = hub.spawn_after(30, self.monitor)
+        self.monitor_thread = hub.spawn_after(31, self.monitor)
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
                 [MAIN_DISPATCHER, DEAD_DISPATCHER])
@@ -462,7 +462,7 @@ class Statistics(app_manager.RyuApp):
                     if tup not in links_in:
                         file.writerow([link[0],link[1], values[0],values[1],values[2]])
 
-            file_metrics = metrics_dir + str(self.count_monitor) + '_net_metrics.csv'
+            file_metrics = metrics_dir + '/net_metrics.csv'
             with open(file_metrics,'w') as csvfile:
                 header_ = ['node1','node2','free_bw','used_bw', 'pkloss', 'delay']
                 file = csv.writer(csvfile, delimiter=',',quotechar='|', quoting=csv.QUOTE_MINIMAL)

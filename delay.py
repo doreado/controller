@@ -15,8 +15,6 @@ from ryu.topology.switches import LLDPPacket
 import ast, csv, json, time
 import setting
 
-import topology_discover_a
-import monitor
 
 CONF = cfg.CONF
 
@@ -68,11 +66,11 @@ class Delay(app_manager.RyuApp):
             self.count += 1
             self._send_echo_request()
             self.create_link_delay()
-            # self.paths_calculator = lookup_service_brick('paths_calculator')
+            # Use new link delay to update paths
             if not self.paths_calculator:
                 self.paths_calculator = lookup_service_brick('paths_calculator')
+                self.paths_calculator.write_paths()
 
-            self.paths_calculator.write_paths()
             try:
                 self.awareness.shortest_paths = {}
             except:
