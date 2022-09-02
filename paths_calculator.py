@@ -19,6 +19,7 @@ class PathsCalculator(app_manager.RyuApp):
         self.name = "paths_calculator"
         self.count = 0
         self.paths = {}
+        self.write_paths_base = True
         self.awareness = lookup_service_brick('awareness')
         self.monitor = lookup_service_brick('monitor')
         self.delay = lookup_service_brick('delay')
@@ -50,6 +51,11 @@ class PathsCalculator(app_manager.RyuApp):
         with open(file,'w') as json_file:
             json.dump(paths, json_file, indent=2)
             # print(paths)
+
+        if self.write_paths_base:
+            with open(setting.PATHS_BASE,'w') as json_file:
+                json.dump(paths, json_file, indent=2)
+            self.write_paths_base = False
 
         total_time = time.time() - time_init
         with open(time_file,'a') as txt_file:
@@ -134,6 +140,7 @@ class PathsCalculator(app_manager.RyuApp):
         paths_dijkstra = self.get_paths_dijkstra()
         # print(paths_dijkstra)
         a = time.time()
+        # TODO handle when a there is a new switch
         sw = self.awareness.switches
 
         with open(setting.STRETCH_DIR + str(self.count)+'_stretch.csv','w') as csvfile:
