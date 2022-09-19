@@ -1,4 +1,3 @@
-from pickle import EMPTY_DICT
 from ryu.base import app_manager
 from ryu.base.app_manager import lookup_service_brick
 from ryu.ofproto import ofproto_v1_3
@@ -19,12 +18,17 @@ class PathsCalculator(app_manager.RyuApp):
         self.name = "paths_calculator"
         self.count = 0
         self.paths = {}
+        self.shortest_paths = {}              # {dpid:{dpid:[[path],],},}
         self.write_paths_base = True
         self.awareness = lookup_service_brick('awareness')
         self.monitor = lookup_service_brick('monitor')
         self.delay = lookup_service_brick('delay')
         self.weight_dict = {}
         self.write_paths = self.write_dijkstra_paths
+
+    def get_shortest_paths(self):
+        return self.shortest_paths
+
 
     def write_dijkstra_paths(self):
         print("Writing paths")

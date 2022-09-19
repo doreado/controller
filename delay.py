@@ -6,7 +6,7 @@ from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.ofproto import ofproto_v1_3
 from ryu.lib import hub
-from ryu.topology.switches import Switches
+# from ryu.topology.switches import Switches
 from ryu.topology.switches import LLDPPacket
 
 # TESTING
@@ -15,6 +15,7 @@ from ryu.topology.switches import LLDPPacket
 import ast, csv, json, time
 import setting
 
+# import monitor
 
 CONF = cfg.CONF
 
@@ -40,6 +41,7 @@ class Delay(app_manager.RyuApp):
         self.link_delay = {}
         self.end_to_end_delay = {}  # {(src_ip, dst_ip): delay, }
         self.delay_dict = {}
+        self.delay_dict = {}
         self.measure_thread = hub.spawn_after(30, self._detector)
 
     @set_ev_cls(ofp_event.EventOFPStateChange,
@@ -58,7 +60,8 @@ class Delay(app_manager.RyuApp):
     def _detector(self):
         """
             Delay detecting functon.
-            Send echo request and calculate link delay periodically
+            Send echo request and calculate link delay periodically,
+            then calculate shortest paths
         """
         self.logger.info("[INFO] Starting delay detecting function")
         while True:
@@ -208,6 +211,12 @@ class Delay(app_manager.RyuApp):
         # if self.awareness.link_to_port:
         #     self.write_dijkstra_paths()
             # self.calc_stretch()
+
+    def get_weight_dict(self):
+        '''
+        Return a weight dictionary of type { src: dst: weight, ... }
+        '''
+        return self.delay_dict
 
     def show_delay_statis(self):
         if self.awareness is None:

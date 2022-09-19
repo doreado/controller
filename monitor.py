@@ -4,17 +4,17 @@ from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.base.app_manager import lookup_service_brick
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
-from ryu.controller.handler import CONFIG_DISPATCHER
+# from ryu.controller.handler import CONFIG_DISPATCHER
 from ryu.controller.handler import set_ev_cls
-from ryu.topology import event, switches
-from ryu.ofproto.ether import ETH_TYPE_IP
-from ryu.topology.api import get_switch, get_link
+# from ryu.topology import event, switches
+# from ryu.ofproto.ether import ETH_TYPE_IP
+# from ryu.topology.api import get_switch, get_link
 from ryu.ofproto import ofproto_v1_3
 from ryu.lib import hub
-from ryu.lib.packet import packet
-from ryu.lib.packet import arp
+# from ryu.lib.packet import packet
+# from ryu.lib.packet import arp
 
-import delay, topology_discover
+# import delay, topology_discover
 import ast, csv, json, time
 import setting
 
@@ -49,6 +49,7 @@ class Statistics(app_manager.RyuApp):
         self.net_metrics= {}
         self.link_free_bw = {}
         self.link_used_bw = {}
+        self.links_bw = {}
         self.stats = {}
         self.port_features = {}
         self.free_bandwidth = {}
@@ -145,30 +146,41 @@ class Statistics(app_manager.RyuApp):
                                                          # calculates period of time between flows
         return self.get_time(n_sec, n_nsec) - self.get_time(p_sec, p_nsec)
 
+    # Topology discoverer responsability
     def get_sw_dst(self, dpid, out_port):
-        for key in self.awareness.link_to_port:
-            src_port = self.awareness.link_to_port[key][0]
+        link_to_port = self.awareness.get_link_to_port()
+        if not link_to_port:
+            return None
+
+        for key in link_to_port:
+            src_port = link_to_port[key][0]
             if key[0] == dpid and src_port == out_port:
                 dst_sw = key[1]
-                dst_port = self.awareness.link_to_port[key][1]
+                dst_port = link_to_port[key][1]
                 # print(dst_sw,dst_port)
                 return (dst_sw, dst_port)
+        return None
 
-    def get_link_bw(self, file, src_dpid, dst_dpid):
-        fin = open(file, "r")
-        bw_capacity_dict = {}
-        for line in fin:
+    def read_bw(self):
+        #Get links capacities
+        file_name = setting.BW
+        fd = open(file_name, "r")
+        for line in fd:
             a = line.split(',')
             if a:
-                s1 = a[0]
-                s2 = a[1]
+                src = int(a[0])
+                dst = int(a[1])
                 # bwd = a[2] #random capacities
                 bwd = a[3] #original caps
-                bw_capacity_dict.setdefault(s1,{})
-                bw_capacity_dict[str(a[0])][str(a[1])] = bwd
-        fin.close()
-        bw_link = bw_capacity_dict[str(src_dpid)][str(dst_dpid)]
-        return bw_link
+                self.links_bw.setdefault(src,{})
+                self.links_bw[src][dst] = float(bwd)
+        print(self.links_bw)
+        fd.close()
+
+    def get_link_bw(self, src_dpid, dst_dpid):
+        if not self.links_bw:
+            self.read_bw()
+        return self.links_bw[src_dpid][dst_dpid]
 
     def get_free_bw(self, port_capacity, speed):
         # freebw: Kbit/s
@@ -185,12 +197,15 @@ class Statistics(app_manager.RyuApp):
                                 key=lambda flow: (flow.match.get('ipv4_src'),flow.match.get('ipv4_dst')))
             for stat in list_flows:
                 out_port = stat.instructions[0].actions[0].port
-                if self.awareness.link_to_port and out_port != 1: #get loss form ports of network
+                if out_port != 1: # get loss form ports of network
                     key = (stat.match.get('ipv4_src'), stat.match.get('ipv4_dst'))
                     tmp1 = self.flow_stats[dp][key]
                     byte_count_src = tmp1[-1][1]
 
                     result = self.get_sw_dst(dp, out_port)
+                    if not result:
+                        continue
+
                     dst_sw = result[0]
                     tmp2 = self.flow_stats[dst_sw][key]
                     byte_count_dst = tmp2[-1][1]
@@ -198,17 +213,21 @@ class Statistics(app_manager.RyuApp):
                     self.save_stats(self.flow_loss[dp], key, flow_loss, 5)
 
     def get_port_loss(self):
-        #Get loss_port
+        # Get loss_port
         bodies = self.stats['port']
         for dp in sorted(bodies.keys()):
             for stat in sorted(bodies[dp], key=attrgetter('port_no')):
-                if self.awareness.link_to_port and stat.port_no != 1 and stat.port_no != ofproto_v1_3.OFPP_LOCAL: #get loss form ports of network
+                if stat.port_no != 1 and stat.port_no != ofproto_v1_3.OFPP_LOCAL:
+                    # Topology discover should provide a funtion to get the tuple (key1, key2)
                     key1 = (dp, stat.port_no)
+                    key2 = self.get_sw_dst(dp, stat.port_no)
+                    if not key2:
+                        continue
+
                     tmp1 = self.port_stats[key1]
                     tx_bytes_src = tmp1[-1][0]
                     tx_pkts_src = tmp1[-1][8]
 
-                    key2 = self.get_sw_dst(dp, stat.port_no)
                     tmp2 = self.port_stats[key2]
                     rx_bytes_dst = tmp2[-1][1]
                     rx_pkts_dst = tmp2[-1][9]
@@ -234,20 +253,22 @@ class Statistics(app_manager.RyuApp):
             for port in self.free_bandwidth[dp]:
                 free_bw1 = self.free_bandwidth[dp][port]
                 key2 = self.get_sw_dst(dp, port) #key2 = (dp,port)
-                free_bw2= self.free_bandwidth[key2[0]][key2[1]]
-                link_free_bw = (free_bw1 + free_bw2)/2
-                link = (dp, key2[0])
-                self.link_free_bw[link] = link_free_bw
+                if key2:
+                    free_bw2= self.free_bandwidth[key2[0]][key2[1]]
+                    link_free_bw = (free_bw1 + free_bw2)/2
+                    link = (dp, key2[0])
+                    self.link_free_bw[link] = link_free_bw
 
     def get_link_used_bw(self):
         #Calculates the total free bw of link and save it in self.link_free_bw[(node1,node2)]:link_free_bw
         for key in list(self.port_speed.keys()):
             used_bw1 = self.port_speed[key][-1]
             key2 = self.get_sw_dst(key[0], key[1]) #key2 = (dp,port)
-            used_bw2 = self.port_speed[key2][-1]
-            link_used_bw = (used_bw1 + used_bw2)/2
-            link = (key[0], key2[0])
-            self.link_used_bw[link] = link_used_bw
+            if key2:
+                used_bw2 = self.port_speed[key2][-1]
+                link_used_bw = (used_bw1 + used_bw2)/2
+                link = (key[0], key2[0])
+                self.link_used_bw[link] = link_used_bw
 
 #---------------------CONTROL PLANE FUNCTIONS---------------------------------
 #---------------------STATISTICS MODULE FUNCTIONS ----------------------------
@@ -307,6 +328,10 @@ class Statistics(app_manager.RyuApp):
 
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def port_stats_reply_handler(self, ev):
+        link_to_port = self.awareness.get_link_to_port()
+        if not link_to_port:
+            return
+
         a = time.time()
         body = ev.msg.body
         dpid = ev.msg.datapath.id
@@ -314,6 +339,7 @@ class Statistics(app_manager.RyuApp):
         self.stats['port'][dpid] = body
         self.free_bandwidth.setdefault(dpid, {})
         self.port_loss.setdefault(dpid, {})
+
         """
             Save port's stats information into self.port_stats.
             Calculate port speed and Save it.
@@ -332,7 +358,6 @@ class Statistics(app_manager.RyuApp):
              stat.rx_crc_err, stat.collisions,
              stat.duration_sec, stat.duration_nsec))
         """
-
         for stat in sorted(body, key=attrgetter('port_no')): #get the value of port_no form body
             port_no = stat.port_no
             key = (dpid, port_no) #src_dpid, src_port
@@ -341,7 +366,7 @@ class Statistics(app_manager.RyuApp):
             self.save_stats(self.port_stats, key, value, 5)
 
             if port_no != ofproto_v1_3.OFPP_LOCAL: #si es dif de puerto local del sw donde se lee port
-                if port_no != 1 and self.awareness.link_to_port :
+                if port_no != 1:
                     # Get port speed and Save it.
                     pre = 0
                     period = setting.MONITOR_PERIOD
@@ -353,10 +378,6 @@ class Statistics(app_manager.RyuApp):
                     speed = self.get_speed(self.port_stats[key][-1][0] + self.port_stats[key][-1][1], pre, period) #speed in bits/s
                     self.save_stats(self.port_speed, key, speed, 5)
 
-                    #Get links capacities
-                    file = setting.BW
-                    link_to_port = self.awareness.link_to_port
-
                     for k in list(link_to_port.keys()):
                         if k[0] == dpid:
                             if link_to_port[k][0] == port_no:
@@ -367,7 +388,7 @@ class Statistics(app_manager.RyuApp):
                                 # if len(list_dst_dpid) > 0:
                                 #     dst_dpid = list_dst_dpid[0][1]
                                 # -----------------------------------------
-                                bw_link = float(self.get_link_bw(file, dpid, dst_dpid))
+                                bw_link = self.get_link_bw(dpid, dst_dpid)
                                 port_state = self.port_features.get(dpid).get(port_no)
 
                                 if port_state:
@@ -448,7 +469,11 @@ class Statistics(app_manager.RyuApp):
         if self.delay.link_delay and self.link_free_bw and self.link_used_bw and self.link_loss:
             for link in self.link_free_bw:
                 self.net_info[link] = [round(self.link_free_bw[link],6) , round(self.delay.link_delay[link],6), round(self.link_loss[link],6)]
-                self.net_metrics[link] = [round(self.link_free_bw[link],6), round(self.link_used_bw[link],6), round(self.link_loss[link],6), round(self.delay.link_delay[link],6)]
+                try:
+                    self.net_metrics[link] = [round(self.link_free_bw[link],6), round(self.link_used_bw[link],6), round(self.link_loss[link],6), round(self.delay.link_delay[link],6)]
+                except:
+                    return
+
 
             self.logger.info("[INFO] Updating net_info file")
             with open(net_info,'w') as csvfile:

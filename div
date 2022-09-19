@@ -1,0 +1,22 @@
+                               TOPOLOGY DISCOVER
+Structures
+- net-graph with switches (nodes) and links (edges)
+- access table
+- link_to_port
+
+Actions
+It retrives topology information throgh RYU api every DISCOVERY_PERIOD, hence
+updates the structures. In addition, if one of the following ryu events happens,
+it doas the same.
+        EventSwitchEnter,
+        EventSwitchLeave,
+        EventPortAdd,
+        EventPortDelete,
+        EventPortModify,
+        EventLinkAdd,
+        EventLinkDelete
+
+
+                                    MONITOR
+Structures
+

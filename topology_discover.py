@@ -1,6 +1,4 @@
-from matplotlib._api import select_matching_signature
 import networkx as nx
-import matplotlib.pyplot as plt
 import time
 
 from ryu import cfg, utils
@@ -45,24 +43,24 @@ class TopologyDiscover(app_manager.RyuApp):
         super(TopologyDiscover, self).__init__(*args, **kwargs)
         self.topology_api_app = self
         self.name = "awareness"
-        self.link_to_port = {}                # {(src_dpid,dst_dpid):(src_port,dst_port),}
+        self.link_to_port = {}                # {(src_dpid, dst_dpid):(src_port,dst_port),}
         self.access_table = {}                # {(sw,port):(ip, mac),}
         self.switch_port_table = {}           # {dpid:set(port_num,),}
         self.access_ports = {}                # {dpid:set(port_num,),}
         self.interior_ports = {}              # {dpid:set(port_num,),}
         self.switches = []                    # self.switches = [dpid,]
-        self.shortest_paths = {}              # {dpid:{dpid:[[path],],},}
+        self.datapaths = {}                   # self.datapaths[dpid] = datapath
         self.pre_link_to_port = {}
         self.pre_access_table = {}
         self.length = 0
         self.graph = nx.DiGraph()
         self.initiation_delay = self.get_initiation_delay(4)
         self.start_time = time.time()
-        self.discover_thread = hub.spawn_after(self.initiation_delay, self._discover)
+        # self.discover_thread = hub.spawn_after(self.initiation_delay, self._discover)
+        self.discover_thread = hub.spawn(self._discover)
 
     def _discover(self):
         while True:
-            self.logger.info("[INFO] Started discovering routine")
             self.get_topology(None)
             # self.show_topology()
             hub.sleep(setting.DISCOVERY_PERIOD)
@@ -123,16 +121,28 @@ class TopologyDiscover(app_manager.RyuApp):
             arp_dst_ip = arp_pkt.dst_ip #delay
             mac = arp_pkt.src_mac
             # Record the access infomation.
-            self.register_access_info(datapath.id, in_port, arp_src_ip, mac)
+            # self.register_access_info(datapath.id, in_port, arp_src_ip, mac)
 
         elif ip_pkt:
             ip_src_ip = ip_pkt.src
             eth = pkt.get_protocols(ethernet.ethernet)[0]
             mac = eth.src
             # Record the access infomation.
-            self.register_access_info(datapath.id, in_port, ip_src_ip, mac)
+            # self.register_access_info(datapath.id, in_port, ip_src_ip, mac)
         else:
             pass
+
+    @set_ev_cls(event.EventHostAdd)
+    def add_host_handler(self, ev):
+        host = ev.host
+        if host.ipv4:
+            dpid = host.port.dpid
+            in_port = host.port.port_no
+            ip = host.ipv4[0]
+            mac = host.mac
+            self.access_table[(dpid, in_port)] = (ip, mac)
+            self.logger.info("[INFO] register for " + str(in_port) + " " + str(ip))
+            print(self.access_table)
 
     @set_ev_cls(events)
     def get_topology(self, ev):
@@ -140,16 +150,22 @@ class TopologyDiscover(app_manager.RyuApp):
         if present_time - self.start_time < self.initiation_delay: #Set to 30s
             return
 
-        self.logger.info("[INFO] Getting topology information")
+        if not ev:
+            self.logger.info("[INFO] Started discovering routine")
+        else:
+            self.logger.info("[INFO] Getting new topology information")
+
         switch_list = get_switch(self.topology_api_app, None)
         self.create_port_map(switch_list)
         time.sleep(0.5)
-        self.switches = [sw.dp.id for sw in switch_list]
+        for sw in switch_list:
+            self.switches.append(sw.dp.id)
+            self.datapaths[sw.dp.id] = sw.dp
         links = get_link(self.topology_api_app, None)
         self.create_interior_links(links)
         self.create_access_ports()
         self.graph = self.get_graph(list(self.link_to_port.keys()))
-        # self.show_topology()
+        self.show_topology()
 
     def get_host_location(self, host_ip):
         """
@@ -215,10 +231,10 @@ class TopologyDiscover(app_manager.RyuApp):
 
             self.link_to_port[(src.dpid, dst.dpid)] = (src.port_no, dst.port_no)
             # Find the access ports and interior ports.
-            if link.src.dpid in self.switches:
-                self.interior_ports[link.src.dpid].add(link.src.port_no)
-            if link.dst.dpid in self.switches:
-                self.interior_ports[link.dst.dpid].add(link.dst.port_no)
+            # if link.src.dpid in self.switches:
+            #     self.interior_ports[link.src.dpid].add(link.src.port_no)
+            # if link.dst.dpid in self.switches:
+            #     self.interior_ports[link.dst.dpid].add(link.dst.port_no)
 
     def create_access_ports(self):
         """
@@ -234,7 +250,6 @@ class TopologyDiscover(app_manager.RyuApp):
         """
             Register access host info into access table.
         """
-        print("register for " + str(in_port) + " " + str(ip))
         if in_port in self.access_ports[dpid]:
             if (dpid, in_port) in self.access_table:
                 if self.access_table[(dpid, in_port)] == (ip, mac):
@@ -243,9 +258,16 @@ class TopologyDiscover(app_manager.RyuApp):
                     self.access_table[(dpid, in_port)] = (ip, mac)
                     return
             else:
+                print("[INFO] register for " + str(in_port) + " " + str(ip))
                 self.access_table.setdefault((dpid, in_port), None)
                 self.access_table[(dpid, in_port)] = (ip, mac)
                 return
+
+    def get_link_to_port(self):
+        """
+            Get link to port.
+        """
+        return self.link_to_port
 
     def show_topology(self):
         if self.pre_link_to_port != self.link_to_port:# and setting.TOSHOW:

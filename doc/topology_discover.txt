@@ -1,0 +1,29 @@
+                               Topology Discover
+
+_Structures_
+* net-graph with switches (nodes) and links (edges)
+* access table              {(sw,port):(ip, mac),}
+* link to port              {(src_dpid,dst_dpid):(src_port,dst_port),}
+* switch_port_table         {dpid:set(port_num,),}
+* interior_ports            {dpid:set(port_num,),}
+* access_ports              {dpid:set(port_num,),}
+
+_Actions_
+It retrives topology information throgh RYU api every DISCOVERY_PERIOD, then
+updates the structures. In addition, if one of the following ryu events happens,
+it'll do the same.
+        EventSwitchEnter,
+        EventSwitchLeave,
+        EventPortAdd,
+        EventPortDelete,
+        EventPortModify,
+        EventLinkAdd,
+        EventLinkDelete
+
+_API_
+get_topology_switches()
+    return a list of dpid
+get_topology_links()
+
+
+
