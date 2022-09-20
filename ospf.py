@@ -1,20 +1,20 @@
-# from operator import attrgetter
+from operator import attrgetter
 
 from ryu.base import app_manager
 from ryu.controller import ofp_event
 from ryu.controller.handler import MAIN_DISPATCHER, DEAD_DISPATCHER
-# from ryu.controller.handler import CONFIG_DISPATCHER
+from ryu.controller.handler import CONFIG_DISPATCHER
 from ryu.controller.handler import set_ev_cls
-# from ryu.topology import event, switches
+from ryu.topology import event, switches
 from ryu.ofproto.ether import ETH_TYPE_IP
-# from ryu.topology.api import get_switch, get_link
+from ryu.topology.api import get_switch, get_link
 from ryu.ofproto import ofproto_v1_3
 from ryu.lib import hub
 from ryu.lib.packet import packet
 from ryu.lib.packet import arp
 
 import topology_discover, delay, monitor, paths_calculator
-import ast, json, time
+import ast, csv, json, time
 import setting
 
 
@@ -36,7 +36,7 @@ class baseline_Dijsktra(app_manager.RyuApp):
         self.monitor = kwargs["monitor"]
         self.paths_calculator = kwargs["paths_calculator"]
         self.delay = kwargs["delay"]
-        self.datapaths = {} # why do not use topology module?
+        self.datapaths = {}
         self.paths = {}
         self.monitor_thread = hub.spawn(self.installation_module)
 
@@ -67,40 +67,32 @@ class baseline_Dijsktra(app_manager.RyuApp):
             hub.sleep(setting.MONITOR_PERIOD)
 
     def flow_install_monitor(self):
-        print("[INFO] Started flow installation routine")
-        out_time= time.time()
-        access_table = self.awareness.access_table
-        for k in access_table.keys():
-            sw_src = k[0]
-            ip_src = access_table[k][0]
-            host_src_port = k[1]
-            for j in access_table.keys():
-                sw_dst = j[0]
-                ip_dst = access_table[j][0]
-                host_dst_port = j[1]
-                self.forwarding(ip_src, ip_dst, sw_src, sw_dst, host_src_port, host_dst_port)
-        end_out_time = time.time()
-        out_total_ = end_out_time - out_time
+        self.logger.info("[INFO] Starting flow installation")
+        start_time = time.time()
+        for dp in list(self.datapaths.values()):
+            for dp2 in list(self.datapaths.values()):
+                if dp.id != dp2.id:
+                    ip_src = '10.0.0.'+str(dp.id)
+                    ip_dst = '10.0.0.'+str(dp2.id)
+                    self.forwarding(dp.id, ip_src, ip_dst, dp.id, dp2.id)
+                    time.sleep(0.0005)
+        self.logger.debug("[DEBUG] Flow installation time {}s"
+                        .format(start_time - time.time()))
         return
 
-    def forwarding(self, ip_src, ip_dst, sw_src, sw_dst, host_src_port, host_dst_port):
+    def forwarding(self, dpid, ip_src, ip_dst, src_sw, dst_sw):
         """
             Get paths and install them into datapaths.
         """
-
-        # self.installed_paths.setdefault(sw_src, {})
-        if sw_dst == sw_src:
-            path = [sw_dst]
-        else:
-            path = self.get_path(str(sw_src), str(sw_dst))
-        # self.installed_paths[sw_src][sw_dst] = path
+        time.sleep(40)
+        self.paths_calculator.write_dijkstra_paths()
+        path = self.paths_calculator.get_path(str(src_sw), str(dst_sw)) #changed to str cuz the json convertion
         flow_info = (ip_src, ip_dst)
-        self.install_flow(self.awareness.datapaths, self.awareness.link_to_port, path, flow_info,
-                           host_src_port, host_dst_port)
+        self.install_flow(self.datapaths, self.awareness.link_to_port, path, flow_info)
 
 
     def install_flow(self, datapaths, link_to_port, path,
-                     flow_info, host_src_port, host_dst_port, data=None):
+                     flow_info, data=None):
         init_time_install = time.time()
         '''
             Install flow entires.
@@ -111,13 +103,13 @@ class baseline_Dijsktra(app_manager.RyuApp):
             self.logger.info("Path error!")
             return
 
-        in_port = host_src_port
+        in_port = 1
         first_dp = datapaths[path[0]]
 
         out_port = first_dp.ofproto.OFPP_LOCAL
         back_info = (flow_info[1], flow_info[0])
 
-        # Flow installing por middle datapaths nel path
+        # Flow installing por middle datapaths in path
         if len(path) > 2:
             for i in range(1, len(path)-1):
                 port = self.get_port_pair_from_link(link_to_port,
@@ -137,7 +129,7 @@ class baseline_Dijsktra(app_manager.RyuApp):
                 self.logger.info("Port is not found")
                 return
             src_port = port_pair[1]
-            dst_port = host_dst_port
+            dst_port = 1 #I know that is the host port --
             last_dp = datapaths[path[-1]]
             self.send_flow_mod(last_dp, flow_info, src_port, dst_port)
             self.send_flow_mod(last_dp, back_info, dst_port, src_port)
@@ -152,13 +144,14 @@ class baseline_Dijsktra(app_manager.RyuApp):
             self.send_flow_mod(first_dp, back_info, out_port, in_port)
 
         # src and dst on the same datapath
-        if len(path) == 1:
-            out_port = host_dst_port
+        else:
+            out_port = 1
             self.send_flow_mod(first_dp, flow_info, in_port, out_port)
             self.send_flow_mod(first_dp, back_info, out_port, in_port)
 
         end_time_install = time.time()
         total_install = end_time_install - init_time_install
+        #print("Time install", total_install)
 
     def send_flow_mod(self, datapath, flow_info, src_port, dst_port):
         """
@@ -175,6 +168,7 @@ class baseline_Dijsktra(app_manager.RyuApp):
 
         self.add_flow(datapath, 1, match, actions,
                       idle_timeout=250, hard_timeout=0)
+
 
     def add_flow(self, dp, priority, match, actions, idle_timeout=0, hard_timeout=0):
         """
@@ -242,8 +236,7 @@ class baseline_Dijsktra(app_manager.RyuApp):
             path = self.paths.get(src).get(dst)
             return path
         else:
-            # paths = self.awareness.shortest_paths
-            paths = self.paths_calculator.get_shortest_paths()
+            paths = self.awareness.shortest_paths
             path = paths.get(src).get(dst)
             return path
 
@@ -272,8 +265,8 @@ class baseline_Dijsktra(app_manager.RyuApp):
         if (src_dpid, dst_dpid) in link_to_port:
             return link_to_port[(src_dpid, dst_dpid)]
         else:
-            self.logger.info("Link from dpid:%s to dpid:%s is not in links" %
-             (src_dpid, dst_dpid))
+            #self.logger.info("Link from dpid:%s to dpid:%s is not in links" %
+            # (src_dpid, dst_dpid))
             return None
 
 

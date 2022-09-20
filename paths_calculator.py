@@ -1,3 +1,4 @@
+from pickle import EMPTY_DICT
 from ryu.base import app_manager
 from ryu.base.app_manager import lookup_service_brick
 from ryu.ofproto import ofproto_v1_3
@@ -18,48 +19,33 @@ class PathsCalculator(app_manager.RyuApp):
         self.name = "paths_calculator"
         self.count = 0
         self.paths = {}
-        self.shortest_paths = {}              # {dpid:{dpid:[[path],],},}
-        self.write_paths_base = True
         self.awareness = lookup_service_brick('awareness')
         self.monitor = lookup_service_brick('monitor')
         self.delay = lookup_service_brick('delay')
         self.weight_dict = {}
-        self.write_paths = self.write_dijkstra_paths
-
-    def get_shortest_paths(self):
-        return self.shortest_paths
-
+        #self.write_paths = self.write_dijkstra_paths()
 
     def write_dijkstra_paths(self):
         print("Writing paths")
         file = setting.PATHS
         time_file = setting.TIMES
-
+        
         # DELAY
         self.weight_dict = self.delay.delay_dict
-
-        # LOSS
-        # for loss in self.monitor.link_loss:
-        #     self.weight_dict[loss[0]][loss[1]] = self.monitor.link_loss[loss]
-        # print(self.weight_dict)
+        print("weights" ,self.weight_dict)
 
         time_init = time.time()
-        paths = {}
+        #paths = {}
         for dp in self.awareness.switches:
-            paths.setdefault(dp,{})
+            self.paths.setdefault(dp,{})
         for src in self.awareness.switches:
             for dst in self.awareness.switches:
                 if src != dst:
-                    paths[src][dst] = self.dijkstra(self.weight_dict, src, dst, visited=[], distances={}, predecessors={})
-
+                    self.paths[src][dst] = self.dijkstra(self.weight_dict, src, dst, visited=[], distances={}, predecessors={})
+                    print(self.paths[src][dst])
         with open(file,'w') as json_file:
-            json.dump(paths, json_file, indent=2)
+            json.dump(self.paths, json_file, indent=2)
             # print(paths)
-
-        if self.write_paths_base:
-            with open(setting.PATHS_BASE,'w') as json_file:
-                json.dump(paths, json_file, indent=2)
-            self.write_paths_base = False
 
         total_time = time.time() - time_init
         with open(time_file,'a') as txt_file:
@@ -126,11 +112,11 @@ class PathsCalculator(app_manager.RyuApp):
 
     def get_path(self, src, dst):
         if self.paths:
-            path = self.paths.get(src).get(dst)
+            path = self.paths[src][dst]
             return path
         else:
             paths = self.get_paths_base()
-            path = paths.get(src).get(dst)
+            path = paths[src][dst]
             return path
 
     def stretch(self, paths, paths_base, src, dst):
@@ -144,10 +130,9 @@ class PathsCalculator(app_manager.RyuApp):
         paths_dijkstra = self.get_paths_dijkstra()
         # print(paths_dijkstra)
         a = time.time()
-        # TODO handle when a there is a new switch
         sw = self.awareness.switches
 
-        with open(setting.STRETCH_DIR + str(self.count)+'_stretch.csv','w') as csvfile:
+        with open(setting.STRETCH_DIR +'stretch.csv','w') as csvfile:
             self.count += 1
             header = ['src','dst','add_st','mul_st']
             file = csv.writer(csvfile, delimiter=',',quotechar='|', quoting=csv.QUOTE_MINIMAL)
